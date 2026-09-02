@@ -1,0 +1,9 @@
+Package: com.flashlight.daemon
+Name: FlashlightDaemon
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: 远程网页控制iPhone手电筒的守护进程。访问 http://iPhone局域网IP:8080 即可控制。
+Maintainer: Flashlight Team
+Author: Flashlight Team
+Section: System
+Depends: firmware (>= 10.0)
