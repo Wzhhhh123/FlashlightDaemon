@@ -19,7 +19,6 @@
 @end
 
 @interface FlashlightController : NSObject
-@property (nonatomic, strong) AVFlashlight *flashlight;
 @property (nonatomic, assign) BOOL isOn;
 @property (nonatomic, assign) float currentLevel;
 - (BOOL)turnOn:(float)brightness;
@@ -35,82 +34,37 @@
     if (self) {
         _isOn = NO;
         _currentLevel = 1.0;
-
-        // Use AVFlashlight private API - same as Control Center
-        Class flashlightClass = NSClassFromString(@"AVFlashlight");
-        NSLog(@"[FlashlightDaemon] AVFlashlight class: %@", flashlightClass);
-
-        if (flashlightClass) {
-            // Check if flashlight is available
-            SEL hasFlashlightSel = NSSelectorFromString(@"hasFlashlight");
-            if ([flashlightClass respondsToSelector:hasFlashlightSel]) {
-                NSMethodSignature *sig = [flashlightClass methodSignatureForSelector:hasFlashlightSel];
-                if (sig) {
-                    NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:sig];
-                    [invocation setTarget:flashlightClass];
-                    [invocation setSelector:hasFlashlightSel];
-                    [invocation invoke];
-
-                    BOOL hasFlash = NO;
-                    [invocation getReturnValue:&hasFlash];
-                    NSLog(@"[FlashlightDaemon] hasFlashlight returned: %d", hasFlash);
-
-                    if (hasFlash) {
-                        // Get AVCaptureDevice
-                        AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-                        NSLog(@"[FlashlightDaemon] AVCaptureDevice: %@", device);
-
-                        if (device) {
-                            // Try [[AVFlashlight alloc] initWithDevice:device]
-                            SEL initWithDeviceSel = NSSelectorFromString(@"initWithDevice:");
-                            NSLog(@"[FlashlightDaemon] instancesRespondToSelector(initWithDevice:): %d", [flashlightClass instancesRespondToSelector:initWithDeviceSel]);
-
-                            if ([flashlightClass instancesRespondToSelector:initWithDeviceSel]) {
-                                id flashlightInstance = [flashlightClass alloc];
-                                NSLog(@"[FlashlightDaemon] [AVFlashlight alloc]: %@", flashlightInstance);
-
-                                NSMethodSignature *initSig = [flashlightInstance methodSignatureForSelector:initWithDeviceSel];
-                                NSLog(@"[FlashlightDaemon] initWithDevice: signature: %@", initSig);
-
-                                if (initSig) {
-                                    NSInvocation *initInvocation = [NSInvocation invocationWithMethodSignature:initSig];
-                                    [initInvocation setTarget:flashlightInstance];
-                                    [initInvocation setSelector:initWithDeviceSel];
-                                    [initInvocation setArgument:&device atIndex:2];
-                                    [initInvocation invoke];
-
-                                    __unsafe_unretained id result = nil;
-                                    [initInvocation getReturnValue:&result];
-                                    _flashlight = result;
-
-                                    NSLog(@"[FlashlightDaemon] initWithDevice: returned: %@", _flashlight);
-
-                                    if (_flashlight) {
-                                        NSLog(@"[FlashlightDaemon] ✓ Using AVFlashlight private API");
-                                    } else {
-                                        NSLog(@"[FlashlightDaemon] ✗ initWithDevice: returned nil");
-                                    }
-                                }
-                            } else {
-                                NSLog(@"[FlashlightDaemon] ✗ initWithDevice: method not found");
-                            }
-                        } else {
-                            NSLog(@"[FlashlightDaemon] ✗ Could not get AVCaptureDevice");
-                        }
-                    } else {
-                        NSLog(@"[FlashlightDaemon] ✗ hasFlashlight returned NO");
-                    }
-                }
-            }
-        } else {
-            NSLog(@"[FlashlightDaemon] ✗ AVFlashlight class not found");
-        }
-
-        if (!_flashlight) {
-            NSLog(@"[FlashlightDaemon] ✗ ERROR: Could not initialize flashlight control");
-        }
+        NSLog(@"[FlashlightDaemon] ✓ Flashlight controller initialized (using AVCaptureDevice)");
     }
     return self;
+}
+
+- (BOOL)turnOn:(float)brightness {
+    brightness = MAX(0.01, MIN(1.0, brightness));
+
+    AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+    if (!device || ![device hasTorch]) {
+        NSLog(@"[FlashlightDaemon] ✗ No torch available");
+        return NO;
+    }
+
+    NSError *error = nil;
+    if ([device lockForConfiguration:&error]) {
+        if ([device setTorchModeOnWithLevel:brightness error:&error]) {
+            _isOn = YES;
+            _currentLevel = brightness;
+            // Don't unlock - keep it locked while torch is on
+            NSLog(@"[FlashlightDaemon] ✓ Flashlight ON at %.2f", brightness);
+            return YES;
+        } else {
+            [device unlockForConfiguration];
+            NSLog(@"[FlashlightDaemon] ✗ setTorchModeOn failed: %@", error);
+        }
+    } else {
+        NSLog(@"[FlashlightDaemon] ✗ lockForConfiguration failed: %@", error);
+    }
+
+    return NO;
 }
 
 - (BOOL)turnOn:(float)brightness {
@@ -150,21 +104,21 @@
 }
 
 - (BOOL)turnOff {
-    if (!_flashlight) {
+    AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+    if (!device || ![device hasTorch]) {
+        NSLog(@"[FlashlightDaemon] ✗ No torch available");
         return NO;
     }
 
-    SEL turnOffSel = NSSelectorFromString(@"turnPowerOff");
-    if ([_flashlight respondsToSelector:turnOffSel]) {
-        NSMethodSignature *sig = [_flashlight methodSignatureForSelector:turnOffSel];
-        NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:sig];
-        [invocation setTarget:_flashlight];
-        [invocation setSelector:turnOffSel];
-        [invocation invoke];
-
+    NSError *error = nil;
+    if ([device lockForConfiguration:&error]) {
+        device.torchMode = AVCaptureTorchModeOff;
+        [device unlockForConfiguration];
         _isOn = NO;
         NSLog(@"[FlashlightDaemon] ✓ Flashlight OFF");
         return YES;
+    } else {
+        NSLog(@"[FlashlightDaemon] ✗ lockForConfiguration failed: %@", error);
     }
 
     return NO;
@@ -178,10 +132,13 @@
 }
 
 - (NSDictionary *)getStatus {
+    AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+    BOOL available = (device && [device hasTorch]);
+
     return @{
         @"isOn": @(_isOn),
         @"level": @(_currentLevel),
-        @"available": @(_flashlight != nil)
+        @"available": @(available)
     };
 }
 
