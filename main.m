@@ -37,11 +37,17 @@
 
         // Use AVFlashlight private API - same as Control Center
         Class flashlightClass = NSClassFromString(@"AVFlashlight");
+        NSLog(@"[FlashlightDaemon] AVFlashlight class: %@", flashlightClass);
+
         if (flashlightClass) {
             // Check if flashlight is available
             SEL hasFlashlightSel = NSSelectorFromString(@"hasFlashlight");
+            NSLog(@"[FlashlightDaemon] respondsToSelector(hasFlashlight): %d", [flashlightClass respondsToSelector:hasFlashlightSel]);
+
             if ([flashlightClass respondsToSelector:hasFlashlightSel]) {
                 NSMethodSignature *sig = [flashlightClass methodSignatureForSelector:hasFlashlightSel];
+                NSLog(@"[FlashlightDaemon] hasFlashlight signature: %@", sig);
+
                 if (sig) {
                     NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:sig];
                     [invocation setTarget:flashlightClass];
@@ -50,12 +56,17 @@
 
                     BOOL hasFlash = NO;
                     [invocation getReturnValue:&hasFlash];
+                    NSLog(@"[FlashlightDaemon] hasFlashlight returned: %d", hasFlash);
 
                     if (hasFlash) {
                         // Get default flashlight instance
                         SEL defaultFlashlightSel = NSSelectorFromString(@"defaultFlashlight");
+                        NSLog(@"[FlashlightDaemon] respondsToSelector(defaultFlashlight): %d", [flashlightClass respondsToSelector:defaultFlashlightSel]);
+
                         if ([flashlightClass respondsToSelector:defaultFlashlightSel]) {
                             NSMethodSignature *defaultSig = [flashlightClass methodSignatureForSelector:defaultFlashlightSel];
+                            NSLog(@"[FlashlightDaemon] defaultFlashlight signature: %@", defaultSig);
+
                             if (defaultSig) {
                                 NSInvocation *defaultInvocation = [NSInvocation invocationWithMethodSignature:defaultSig];
                                 [defaultInvocation setTarget:flashlightClass];
@@ -65,6 +76,8 @@
                                 __unsafe_unretained id result = nil;
                                 [defaultInvocation getReturnValue:&result];
                                 _flashlight = result;
+
+                                NSLog(@"[FlashlightDaemon] defaultFlashlight returned: %@", _flashlight);
 
                                 if (_flashlight) {
                                     NSLog(@"[FlashlightDaemon] ✓ Using AVFlashlight private API (Control Center method)");
@@ -78,6 +91,8 @@
                     }
                 }
             }
+        } else {
+            NSLog(@"[FlashlightDaemon] ✗ AVFlashlight class not found");
         }
 
         if (!_flashlight) {
