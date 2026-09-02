@@ -10,7 +10,8 @@
 // Private API for flashlight control
 @interface AVFlashlight : NSObject
 + (BOOL)hasFlashlight;
-+ (instancetype)defaultFlashlight;
++ (instancetype)flashlightWithDevice:(AVCaptureDevice *)device;
+- (instancetype)initWithDevice:(AVCaptureDevice *)device;
 - (BOOL)setFlashlightLevel:(float)level withError:(NSError **)error;
 - (void)turnPowerOff;
 - (float)flashlightLevel;
@@ -59,32 +60,43 @@
                     NSLog(@"[FlashlightDaemon] hasFlashlight returned: %d", hasFlash);
 
                     if (hasFlash) {
-                        // Get default flashlight instance
-                        SEL defaultFlashlightSel = NSSelectorFromString(@"defaultFlashlight");
-                        NSLog(@"[FlashlightDaemon] respondsToSelector(defaultFlashlight): %d", [flashlightClass respondsToSelector:defaultFlashlightSel]);
+                        // Get AVCaptureDevice
+                        AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+                        NSLog(@"[FlashlightDaemon] AVCaptureDevice: %@", device);
 
-                        if ([flashlightClass respondsToSelector:defaultFlashlightSel]) {
-                            NSMethodSignature *defaultSig = [flashlightClass methodSignatureForSelector:defaultFlashlightSel];
-                            NSLog(@"[FlashlightDaemon] defaultFlashlight signature: %@", defaultSig);
+                        if (device) {
+                            // Try flashlightWithDevice: method
+                            SEL flashlightWithDeviceSel = NSSelectorFromString(@"flashlightWithDevice:");
+                            NSLog(@"[FlashlightDaemon] respondsToSelector(flashlightWithDevice:): %d", [flashlightClass respondsToSelector:flashlightWithDeviceSel]);
 
-                            if (defaultSig) {
-                                NSInvocation *defaultInvocation = [NSInvocation invocationWithMethodSignature:defaultSig];
-                                [defaultInvocation setTarget:flashlightClass];
-                                [defaultInvocation setSelector:defaultFlashlightSel];
-                                [defaultInvocation invoke];
+                            if ([flashlightClass respondsToSelector:flashlightWithDeviceSel]) {
+                                NSMethodSignature *flashlightSig = [flashlightClass methodSignatureForSelector:flashlightWithDeviceSel];
+                                NSLog(@"[FlashlightDaemon] flashlightWithDevice: signature: %@", flashlightSig);
 
-                                __unsafe_unretained id result = nil;
-                                [defaultInvocation getReturnValue:&result];
-                                _flashlight = result;
+                                if (flashlightSig) {
+                                    NSInvocation *flashlightInvocation = [NSInvocation invocationWithMethodSignature:flashlightSig];
+                                    [flashlightInvocation setTarget:flashlightClass];
+                                    [flashlightInvocation setSelector:flashlightWithDeviceSel];
+                                    [flashlightInvocation setArgument:&device atIndex:2];
+                                    [flashlightInvocation invoke];
 
-                                NSLog(@"[FlashlightDaemon] defaultFlashlight returned: %@", _flashlight);
+                                    __unsafe_unretained id result = nil;
+                                    [flashlightInvocation getReturnValue:&result];
+                                    _flashlight = result;
 
-                                if (_flashlight) {
-                                    NSLog(@"[FlashlightDaemon] ✓ Using AVFlashlight private API (Control Center method)");
-                                } else {
-                                    NSLog(@"[FlashlightDaemon] ✗ Failed to get AVFlashlight instance");
+                                    NSLog(@"[FlashlightDaemon] flashlightWithDevice: returned: %@", _flashlight);
+
+                                    if (_flashlight) {
+                                        NSLog(@"[FlashlightDaemon] ✓ Using AVFlashlight private API (Control Center method)");
+                                    } else {
+                                        NSLog(@"[FlashlightDaemon] ✗ flashlightWithDevice: returned nil");
+                                    }
                                 }
+                            } else {
+                                NSLog(@"[FlashlightDaemon] ✗ flashlightWithDevice: method not found");
                             }
+                        } else {
+                            NSLog(@"[FlashlightDaemon] ✗ Could not get AVCaptureDevice");
                         }
                     } else {
                         NSLog(@"[FlashlightDaemon] ✗ hasFlashlight returned NO");
