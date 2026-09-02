@@ -30,7 +30,6 @@ jobs:
 
     - name: Setup iOS Toolchain
       run: |
-        git clone --depth=1 https://github.com/sbingner/llvm-project.git -b apple/stable/20190104 toolchain-src
         mkdir -p theos/toolchain/linux/iphone/bin
         sudo apt-get update
         sudo apt-get install -y clang llvm lld
