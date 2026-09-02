@@ -67,42 +67,6 @@
     return NO;
 }
 
-- (BOOL)turnOn:(float)brightness {
-    brightness = MAX(0.01, MIN(1.0, brightness));
-
-    if (!_flashlight) {
-        NSLog(@"[FlashlightDaemon] ✗ No flashlight available");
-        return NO;
-    }
-
-    NSError *error = nil;
-    SEL setLevelSel = NSSelectorFromString(@"setFlashlightLevel:withError:");
-
-    if ([_flashlight respondsToSelector:setLevelSel]) {
-        NSMethodSignature *sig = [_flashlight methodSignatureForSelector:setLevelSel];
-        NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:sig];
-        [invocation setTarget:_flashlight];
-        [invocation setSelector:setLevelSel];
-        [invocation setArgument:&brightness atIndex:2];
-        [invocation setArgument:&error atIndex:3];
-        [invocation invoke];
-
-        BOOL success = NO;
-        [invocation getReturnValue:&success];
-
-        if (success) {
-            _isOn = YES;
-            _currentLevel = brightness;
-            NSLog(@"[FlashlightDaemon] ✓ Flashlight ON at %.2f", brightness);
-            return YES;
-        } else {
-            NSLog(@"[FlashlightDaemon] ✗ setFlashlightLevel error: %@", error);
-        }
-    }
-
-    return NO;
-}
-
 - (BOOL)turnOff {
     AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
     if (!device || ![device hasTorch]) {
