@@ -15,32 +15,37 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y curl unzip git build-essential fakeroot
+
     - name: Setup Theos
-      uses: actions/checkout@v4
-      with:
-        repository: theos/theos
-        path: theos
-        submodules: recursive
+      run: |
+        git clone --recursive https://github.com/theos/theos.git $HOME/theos
+        echo "THEOS=$HOME/theos" >> $GITHUB_ENV
 
     - name: Setup iOS SDK
       run: |
+        cd $HOME/theos/sdks
         curl -LO https://github.com/theos/sdks/archive/master.zip
         unzip master.zip
-        mv sdks-master/*.sdk theos/sdks/
+        mv sdks-master/*.sdk .
+        rm -rf sdks-master master.zip
 
     - name: Setup iOS Toolchain
       run: |
-        mkdir -p theos/toolchain/linux/iphone/bin
-        sudo apt-get update
-        sudo apt-get install -y clang llvm lld
-        ln -s /usr/bin/clang theos/toolchain/linux/iphone/bin/clang
-        ln -s /usr/bin/clang++ theos/toolchain/linux/iphone/bin/clang++
-        ln -s /usr/bin/ld.lld theos/toolchain/linux/iphone/bin/ld
+        cd $HOME/theos/toolchain
+        curl -LO https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v2.2.0/swift-toolchain-linux-x86_64.tar.xz
+        tar -xf swift-toolchain-linux-x86_64.tar.xz
+        rm swift-toolchain-linux-x86_64.tar.xz
+        mv swift-toolchain-linux-x86_64 linux/iphone
 
     - name: Build package
       run: |
-        export THEOS=$GITHUB_WORKSPACE/theos
+        export THEOS=$HOME/theos
         export PATH="$THEOS/bin:$PATH"
+        cd $GITHUB_WORKSPACE
         make package FINALPACKAGE=1
 
     - name: Upload deb
