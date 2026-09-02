@@ -1,29 +1,21 @@
-name: Build deb package
+name: Build iOS Package
 
 on:
   push:
-    branches: [ main, master ]
-  pull_request:
     branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
 
     steps:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y curl unzip git build-essential fakeroot
-
     - name: Setup Theos
       run: |
         git clone --recursive https://github.com/theos/theos.git $HOME/theos
-        echo "THEOS=$HOME/theos" >> $GITHUB_ENV
 
     - name: Setup iOS SDK
       run: |
@@ -33,31 +25,14 @@ jobs:
         mv sdks-master/*.sdk .
         rm -rf sdks-master master.zip
 
-    - name: Setup iOS Toolchain
-      run: |
-        cd $HOME/theos/toolchain
-        curl -LO https://github.com/kabiroberai/swift-toolchain-linux/releases/download/v2.2.0/swift-toolchain-linux-x86_64.tar.xz
-        tar -xf swift-toolchain-linux-x86_64.tar.xz
-        rm swift-toolchain-linux-x86_64.tar.xz
-        mv swift-toolchain-linux-x86_64 linux/iphone
-
     - name: Build package
       run: |
         export THEOS=$HOME/theos
         export PATH="$THEOS/bin:$PATH"
-        cd $GITHUB_WORKSPACE
         make package FINALPACKAGE=1
 
     - name: Upload deb
       uses: actions/upload-artifact@v4
       with:
-        name: flashlight-daemon
+        name: FlashlightDaemon-deb
         path: packages/*.deb
-
-    - name: Create Release (on tag)
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
-      with:
-        files: packages/*.deb
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
