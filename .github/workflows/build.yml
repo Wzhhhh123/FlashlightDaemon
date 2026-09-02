@@ -30,9 +30,13 @@ jobs:
 
     - name: Setup iOS Toolchain
       run: |
-        curl -LO https://github.com/theos/toolchain/releases/download/linux-iphone-toolchain-clang-16/iphone-toolchain-linux-amd64-clang-16.tar.xz
-        mkdir -p theos/toolchain/linux/iphone
-        tar -xf iphone-toolchain-linux-amd64-clang-16.tar.xz -C theos/toolchain/linux/iphone
+        git clone --depth=1 https://github.com/sbingner/llvm-project.git -b apple/stable/20190104 toolchain-src
+        mkdir -p theos/toolchain/linux/iphone/bin
+        sudo apt-get update
+        sudo apt-get install -y clang llvm lld
+        ln -s /usr/bin/clang theos/toolchain/linux/iphone/bin/clang
+        ln -s /usr/bin/clang++ theos/toolchain/linux/iphone/bin/clang++
+        ln -s /usr/bin/ld.lld theos/toolchain/linux/iphone/bin/ld
 
     - name: Build package
       run: |
