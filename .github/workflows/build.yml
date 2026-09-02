@@ -28,6 +28,12 @@ jobs:
         unzip master.zip
         mv sdks-master/*.sdk theos/sdks/
 
+    - name: Setup iOS Toolchain
+      run: |
+        curl -LO https://github.com/theos/toolchain/releases/download/linux-iphone-toolchain-clang-16/iphone-toolchain-linux-amd64-clang-16.tar.xz
+        mkdir -p theos/toolchain/linux/iphone
+        tar -xf iphone-toolchain-linux-amd64-clang-16.tar.xz -C theos/toolchain/linux/iphone
+
     - name: Build package
       run: |
         export THEOS=$GITHUB_WORKSPACE/theos
