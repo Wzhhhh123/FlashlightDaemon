@@ -111,8 +111,8 @@ static BOOL FlashlightSetLevel(id flashlight, float level, NSError **outError) {
     NSMethodSignature *sig = [flashlight methodSignatureForSelector:sel];
     if (!sig) return NO;
 
-    NSError *error = nil;
-    NSError **errorPtr = &error;
+    NSError * __autoreleasing error = nil;
+    NSError * __autoreleasing *errorPtr = &error;
     NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
     [inv setTarget:flashlight];
     [inv setSelector:sel];
