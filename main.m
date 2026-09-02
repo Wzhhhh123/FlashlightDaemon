@@ -53,8 +53,18 @@
                     [invocation getReturnValue:&hasFlash];
 
                     if (hasFlash && [flashlightClass respondsToSelector:defaultFlashlightSel]) {
-                        _flashlight = [flashlightClass performSelector:defaultFlashlightSel];
-                        NSLog(@"[FlashlightDaemon] Using AVFlashlight private API");
+                        NSMethodSignature *defaultSig = [flashlightClass methodSignatureForSelector:defaultFlashlightSel];
+                        if (defaultSig) {
+                            NSInvocation *defaultInvocation = [NSInvocation invocationWithMethodSignature:defaultSig];
+                            [defaultInvocation setTarget:flashlightClass];
+                            [defaultInvocation setSelector:defaultFlashlightSel];
+                            [defaultInvocation invoke];
+
+                            void *result = NULL;
+                            [defaultInvocation getReturnValue:&result];
+                            _flashlight = (__bridge AVFlashlight *)result;
+                            NSLog(@"[FlashlightDaemon] Using AVFlashlight private API");
+                        }
                     }
                 }
             }
