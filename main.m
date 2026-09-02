@@ -36,10 +36,27 @@
 
         // Try to use private AVFlashlight API first (better control)
         Class flashlightClass = NSClassFromString(@"AVFlashlight");
-        if (flashlightClass && [flashlightClass respondsToSelector:@selector(hasFlashlight)]) {
-            if ([flashlightClass hasFlashlight]) {
-                _flashlight = [flashlightClass defaultFlashlight];
-                NSLog(@"[FlashlightDaemon] Using AVFlashlight private API");
+        if (flashlightClass) {
+            SEL hasFlashlightSel = NSSelectorFromString(@"hasFlashlight");
+            SEL defaultFlashlightSel = NSSelectorFromString(@"defaultFlashlight");
+
+            if ([flashlightClass respondsToSelector:hasFlashlightSel]) {
+                // Use NSInvocation to safely call class method
+                NSMethodSignature *sig = [flashlightClass methodSignatureForSelector:hasFlashlightSel];
+                if (sig) {
+                    NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:sig];
+                    [invocation setTarget:flashlightClass];
+                    [invocation setSelector:hasFlashlightSel];
+                    [invocation invoke];
+
+                    BOOL hasFlash = NO;
+                    [invocation getReturnValue:&hasFlash];
+
+                    if (hasFlash && [flashlightClass respondsToSelector:defaultFlashlightSel]) {
+                        _flashlight = [flashlightClass performSelector:defaultFlashlightSel];
+                        NSLog(@"[FlashlightDaemon] Using AVFlashlight private API");
+                    }
+                }
             }
         }
 
