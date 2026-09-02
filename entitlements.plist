@@ -6,5 +6,9 @@
 	<true/>
 	<key>com.apple.private.avfoundation.allow-flashlight-control</key>
 	<true/>
+	<key>com.apple.private.security.no-container</key>
+	<true/>
+	<key>com.apple.security.get-task-allow</key>
+	<true/>
 </dict>
 </plist>

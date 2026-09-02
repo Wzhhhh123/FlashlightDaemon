@@ -19,6 +19,7 @@
 @property (nonatomic, strong) AVCaptureDevice *device;
 @property (nonatomic, strong) AVFlashlight *flashlight;
 @property (nonatomic, assign) BOOL isOn;
+@property (nonatomic, assign) BOOL isDeviceLocked;
 @property (nonatomic, assign) float currentLevel;
 - (BOOL)turnOn:(float)brightness;
 - (BOOL)turnOff;
@@ -32,6 +33,7 @@
     self = [super init];
     if (self) {
         _isOn = NO;
+        _isDeviceLocked = NO;
         _currentLevel = 1.0;
 
         // Try to use private AVFlashlight API first (better control)
@@ -84,7 +86,7 @@
 }
 
 - (BOOL)turnOn:(float)brightness {
-    brightness = MAX(0.0, MIN(1.0, brightness));
+    brightness = MAX(0.01, MIN(1.0, brightness)); // Minimum 0.01 to ensure torch is actually on
 
     if (_flashlight) {
         NSError *error = nil;
@@ -101,16 +103,26 @@
 
     if (_device && [_device hasTorch]) {
         NSError *error = nil;
+
+        // Unlock first if already locked
+        if (_isDeviceLocked) {
+            [_device unlockForConfiguration];
+            _isDeviceLocked = NO;
+        }
+
         if ([_device lockForConfiguration:&error]) {
+            _isDeviceLocked = YES;
             if ([_device setTorchModeOnWithLevel:brightness error:&error]) {
                 _isOn = YES;
                 _currentLevel = brightness;
-                [_device unlockForConfiguration];
+                // Keep device locked while torch is on
                 NSLog(@"[FlashlightDaemon] Flashlight ON at %.2f (AVCaptureDevice)", brightness);
                 return YES;
+            } else {
+                [_device unlockForConfiguration];
+                _isDeviceLocked = NO;
+                NSLog(@"[FlashlightDaemon] setTorchMode error: %@", error);
             }
-            [_device unlockForConfiguration];
-            NSLog(@"[FlashlightDaemon] setTorchMode error: %@", error);
         } else {
             NSLog(@"[FlashlightDaemon] lockForConfiguration error: %@", error);
         }
@@ -129,12 +141,26 @@
 
     if (_device && [_device hasTorch]) {
         NSError *error = nil;
+
+        // If device is already locked from turnOn
+        if (_isDeviceLocked) {
+            _device.torchMode = AVCaptureTorchModeOff;
+            [_device unlockForConfiguration];
+            _isDeviceLocked = NO;
+            _isOn = NO;
+            NSLog(@"[FlashlightDaemon] Flashlight OFF (AVCaptureDevice - was locked)");
+            return YES;
+        }
+
+        // If not locked, lock it first
         if ([_device lockForConfiguration:&error]) {
             _device.torchMode = AVCaptureTorchModeOff;
             [_device unlockForConfiguration];
             _isOn = NO;
             NSLog(@"[FlashlightDaemon] Flashlight OFF (AVCaptureDevice)");
             return YES;
+        } else {
+            NSLog(@"[FlashlightDaemon] turnOff lockForConfiguration error: %@", error);
         }
     }
 
