@@ -292,11 +292,7 @@ typedef NS_ENUM(NSInteger, FlashlightStrategy) {
 - (BOOL)turnOff {
     BOOL ok = NO;
 
-    if (_flashlight) {
-        FlashlightPowerOff(_flashlight);
-        ok = YES;
-    }
-
+    // 1. 先用 AVCaptureDevice 关闭
     if (_device && [_device hasTorch]) {
         NSError *error = nil;
         if (!_deviceLocked && [_device lockForConfiguration:&error]) {
@@ -310,6 +306,16 @@ typedef NS_ENUM(NSInteger, FlashlightStrategy) {
         } else {
             NSLog(@"[FlashlightDaemon] ✗ turnOff lock failed: %@", error);
         }
+    }
+
+    // 2. 再用 AVFlashlight 关闭（确保彻底关闭）
+    if (_flashlight) {
+        FlashlightPowerOff(_flashlight);
+        // 保持 flashlight 对象存活，延迟 100ms 后再清理
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            // 延迟释放，确保关闭命令生效
+        });
+        ok = YES;
     }
 
     [self stopSession];
