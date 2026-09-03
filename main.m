@@ -289,10 +289,87 @@ typedef NS_ENUM(NSInteger, FlashlightStrategy) {
     return NO;
 }
 
-- (BOOL)turnOff {
+// 方案1: 只用 AVFlashlight setLevel:0
+- (BOOL)turnOffMethod1 {
+    NSLog(@"[FlashlightDaemon] Testing Method 1: AVFlashlight setLevel:0");
+    if (_flashlight) {
+        NSError *error = nil;
+        BOOL success = FlashlightSetLevel(_flashlight, 0.0, &error);
+        if (!success) {
+            NSLog(@"[FlashlightDaemon] ✗ setLevel:0 failed: %@", error);
+        }
+        _isOn = NO;
+        NSLog(@"[FlashlightDaemon] ✓ Method 1 done (torchActive=%d)", _device ? [_device isTorchActive] : 0);
+        return success;
+    }
+    return NO;
+}
+
+// 方案2: AVFlashlight turnPowerOff + 不释放对象
+- (BOOL)turnOffMethod2 {
+    NSLog(@"[FlashlightDaemon] Testing Method 2: AVFlashlight turnPowerOff (keep object)");
+    if (_flashlight) {
+        FlashlightPowerOff(_flashlight);
+        // 不调用 stopSession，保持 flashlight 和 session 存活
+        _isOn = NO;
+        NSLog(@"[FlashlightDaemon] ✓ Method 2 done (torchActive=%d)", _device ? [_device isTorchActive] : 0);
+        return YES;
+    }
+    return NO;
+}
+
+// 方案3: 只用 AVCaptureDevice torchMode=Off + 保持锁定
+- (BOOL)turnOffMethod3 {
+    NSLog(@"[FlashlightDaemon] Testing Method 3: AVCaptureDevice torchMode=Off (keep locked)");
+    if (_device && [_device hasTorch]) {
+        NSError *error = nil;
+        if (!_deviceLocked && [_device lockForConfiguration:&error]) {
+            _deviceLocked = YES;
+        }
+        if (_deviceLocked) {
+            _device.torchMode = AVCaptureTorchModeOff;
+            // 不解锁，保持锁定状态
+            _isOn = NO;
+            NSLog(@"[FlashlightDaemon] ✓ Method 3 done (torchActive=%d)", [_device isTorchActive]);
+            return YES;
+        } else {
+            NSLog(@"[FlashlightDaemon] ✗ Method 3 lock failed: %@", error);
+        }
+    }
+    return NO;
+}
+
+// 方案4: 重新创建 AVFlashlight 并设置为0
+- (BOOL)turnOffMethod4 {
+    NSLog(@"[FlashlightDaemon] Testing Method 4: Recreate AVFlashlight + setLevel:0");
+    NSMutableString *log = [NSMutableString string];
+    id newFlashlight = CreateFlashlight(_device, log);
+    if (newFlashlight) {
+        NSError *error = nil;
+        BOOL success = FlashlightSetLevel(newFlashlight, 0.0, &error);
+        if (!success) {
+            NSLog(@"[FlashlightDaemon] ✗ new flashlight setLevel:0 failed: %@", error);
+        }
+        FlashlightPowerOff(newFlashlight);
+        _isOn = NO;
+        NSLog(@"[FlashlightDaemon] ✓ Method 4 done (torchActive=%d)", _device ? [_device isTorchActive] : 0);
+        return success;
+    }
+    return NO;
+}
+
+// 方案5: 组合方案 - setLevel:0 + turnPowerOff + torchMode=Off
+- (BOOL)turnOffMethod5 {
+    NSLog(@"[FlashlightDaemon] Testing Method 5: Combined (setLevel:0 + turnPowerOff + torchMode=Off)");
     BOOL ok = NO;
 
-    // 1. 先用 AVCaptureDevice 关闭
+    if (_flashlight) {
+        NSError *error = nil;
+        FlashlightSetLevel(_flashlight, 0.0, &error);
+        FlashlightPowerOff(_flashlight);
+        ok = YES;
+    }
+
     if (_device && [_device hasTorch]) {
         NSError *error = nil;
         if (!_deviceLocked && [_device lockForConfiguration:&error]) {
@@ -303,25 +380,18 @@ typedef NS_ENUM(NSInteger, FlashlightStrategy) {
             [_device unlockForConfiguration];
             _deviceLocked = NO;
             ok = YES;
-        } else {
-            NSLog(@"[FlashlightDaemon] ✗ turnOff lock failed: %@", error);
         }
-    }
-
-    // 2. 再用 AVFlashlight 关闭（确保彻底关闭）
-    if (_flashlight) {
-        FlashlightPowerOff(_flashlight);
-        // 保持 flashlight 对象存活，延迟 100ms 后再清理
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            // 延迟释放，确保关闭命令生效
-        });
-        ok = YES;
     }
 
     [self stopSession];
     _isOn = NO;
-    NSLog(@"[FlashlightDaemon] ✓ OFF (torchActive=%d)", _device ? [_device isTorchActive] : 0);
+    NSLog(@"[FlashlightDaemon] ✓ Method 5 done (torchActive=%d)", _device ? [_device isTorchActive] : 0);
     return ok;
+}
+
+// 默认关闭方法 (当前方案)
+- (BOOL)turnOff {
+    return [self turnOffMethod5];  // 默认用方案5
 }
 
 - (NSDictionary *)status {
@@ -508,6 +578,21 @@ static NSString *const kIndexHTML = @"<!DOCTYPE html><html><head><meta charset='
         [self sendJSON:[c status] to:clientSocket];
     } else if ([path isEqualToString:@"/off"]) {
         [c turnOff];
+        [self sendJSON:[c status] to:clientSocket];
+    } else if ([path isEqualToString:@"/off/method1"]) {
+        [c turnOffMethod1];
+        [self sendJSON:[c status] to:clientSocket];
+    } else if ([path isEqualToString:@"/off/method2"]) {
+        [c turnOffMethod2];
+        [self sendJSON:[c status] to:clientSocket];
+    } else if ([path isEqualToString:@"/off/method3"]) {
+        [c turnOffMethod3];
+        [self sendJSON:[c status] to:clientSocket];
+    } else if ([path isEqualToString:@"/off/method4"]) {
+        [c turnOffMethod4];
+        [self sendJSON:[c status] to:clientSocket];
+    } else if ([path isEqualToString:@"/off/method5"]) {
+        [c turnOffMethod5];
         [self sendJSON:[c status] to:clientSocket];
     } else if ([path isEqualToString:@"/toggle"]) {
         if (c.isOn) {
