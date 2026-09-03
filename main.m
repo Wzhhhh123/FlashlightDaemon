@@ -126,6 +126,36 @@ static BOOL FlashlightSetLevel(id flashlight, float level, NSError **outError) {
     return success;
 }
 
+// 独立控制冷光和暖光
+static BOOL FlashlightSetDualLevel(id flashlight, float coolLevel, float warmLevel, NSError **outError) {
+    // 尝试 setTorchWithWhiteLevel:yellowLevel:error: (iOS 14+)
+    SEL sel = NSSelectorFromString(@"setTorchWithWhiteLevel:yellowLevel:error:");
+    if (flashlight && [flashlight respondsToSelector:sel]) {
+        NSMethodSignature *sig = [flashlight methodSignatureForSelector:sel];
+        if (sig) {
+            NSError * __autoreleasing error = nil;
+            NSError * __autoreleasing *errorPtr = &error;
+            NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+            [inv setTarget:flashlight];
+            [inv setSelector:sel];
+            [inv setArgument:&coolLevel atIndex:2];  // whiteLevel
+            [inv setArgument:&warmLevel atIndex:3];   // yellowLevel
+            [inv setArgument:&errorPtr atIndex:4];
+            [inv invoke];
+
+            BOOL success = NO;
+            [inv getReturnValue:&success];
+            if (outError) *outError = error;
+            return success;
+        }
+    }
+
+    // 回退: 尝试 setFlashlightLevel:withError: 使用混合亮度
+    float mixedLevel = (coolLevel + warmLevel) / 2.0;
+    return FlashlightSetLevel(flashlight, mixedLevel, outError);
+}
+
+
 static void FlashlightPowerOff(id flashlight) {
     SEL sel = NSSelectorFromString(@"turnPowerOff");
     if (flashlight && [flashlight respondsToSelector:sel]) {
@@ -153,9 +183,12 @@ typedef NS_ENUM(NSInteger, FlashlightStrategy) {
 @property (nonatomic, assign) BOOL isOn;
 @property (nonatomic, assign) BOOL deviceLocked;
 @property (nonatomic, assign) float currentLevel;
+@property (nonatomic, assign) float coolLevel;   // 冷光亮度 0-1
+@property (nonatomic, assign) float warmLevel;   // 暖光亮度 0-1
 @property (nonatomic, copy) NSString *activeMethod;
 @property (nonatomic, copy) NSString *debugInfo;
 - (BOOL)turnOn:(float)brightness strategy:(FlashlightStrategy)strategy;
+- (BOOL)turnOnDual:(float)cool warm:(float)warm;  // 双色温控制
 - (BOOL)turnOff;
 - (NSDictionary *)status;
 @end
@@ -167,6 +200,8 @@ typedef NS_ENUM(NSInteger, FlashlightStrategy) {
     if (self) {
         _isOn = NO;
         _currentLevel = 1.0;
+        _coolLevel = 1.0;
+        _warmLevel = 0.0;  // 默认只开冷光
         _activeMethod = @"none";
 
         NSMutableString *log = [NSMutableString string];
@@ -289,6 +324,34 @@ typedef NS_ENUM(NSInteger, FlashlightStrategy) {
     return NO;
 }
 
+// 双色温控制: 独立控制冷光和暖光
+- (BOOL)turnOnDual:(float)cool warm:(float)warm {
+    cool = MAX(0.0f, MIN(1.0f, cool));
+    warm = MAX(0.0f, MIN(1.0f, warm));
+
+    // 优先使用 AVFlashlight 的双色温 API
+    if (_flashlight) {
+        NSError *error = nil;
+        if (FlashlightSetDualLevel(_flashlight, cool, warm, &error)) {
+            _isOn = (cool > 0 || warm > 0);
+            _coolLevel = cool;
+            _warmLevel = warm;
+            _currentLevel = (cool + warm) / 2.0;
+            _activeMethod = @"AVFlashlight-Dual";
+            NSLog(@"[FlashlightDaemon] ✓ Dual ON cool=%.2f warm=%.2f", cool, warm);
+            return YES;
+        }
+        NSLog(@"[FlashlightDaemon] ✗ Dual control failed: %@, fallback to single", error);
+    }
+
+    // 回退: 使用单色温模式 (混合亮度)
+    float mixedLevel = (cool + warm) / 2.0;
+    if (mixedLevel > 0) {
+        return [self turnOn:mixedLevel strategy:FlashlightStrategyAuto];
+    }
+    return NO;
+}
+
 // 方案1: 只用 AVFlashlight setLevel:0
 - (BOOL)turnOffMethod1 {
     NSLog(@"[FlashlightDaemon] Testing Method 1: AVFlashlight setLevel:0");
@@ -399,6 +462,8 @@ typedef NS_ENUM(NSInteger, FlashlightStrategy) {
     return @{
         @"isOn": @(_isOn),
         @"level": @(_currentLevel),
+        @"coolLevel": @(_coolLevel),      // 冷光亮度
+        @"warmLevel": @(_warmLevel),      // 暖光亮度
         @"available": @(_device != nil && [_device hasTorch]),
         @"torchActive": @(torchActive),   // ground truth from the hardware
         @"method": _activeMethod ?: @"none",
@@ -427,6 +492,12 @@ static NSString *const kIndexHTML = @"<!DOCTYPE html><html><head><meta charset='
 "input[type=range]{width:100%;height:8px;border-radius:4px;background:#ddd;outline:none;-webkit-appearance:none;margin-top:20px}"
 "input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;background:#667eea}"
 ".lvl{text-align:center;margin-top:10px;font-size:15px;color:#666}"
+".dual{margin-top:24px;padding-top:24px;border-top:1px solid #ddd}"
+".dual h2{font-size:18px;margin-bottom:16px;text-align:center;color:#222}"
+".dual-row{display:flex;gap:12px;align-items:center;margin-bottom:12px}"
+".dual-row label{flex:0 0 60px;font-size:14px;color:#666}"
+".dual-row input{flex:1}"
+".dual-btn{background:#FF9800;margin-top:12px}"
 "</style></head><body><div class='card'>"
 "<h1>🔦 手电筒控制</h1>"
 "<div class='status' id='status'>加载中...</div>"
@@ -438,6 +509,20 @@ static NSString *const kIndexHTML = @"<!DOCTYPE html><html><head><meta charset='
 "<button data-m='avflashlight'>方法A</button>"
 "<button data-m='session'>方法B</button>"
 "<button data-m='plain'>方法C</button>"
+"</div>"
+"<div class='dual'>"
+"<h2>🌡️ 双色温控制</h2>"
+"<div class='dual-row'>"
+"<label>冷光:</label>"
+"<input type='range' id='cool' min='0' max='100' value='100'>"
+"<span id='coolVal'>100</span>%"
+"</div>"
+"<div class='dual-row'>"
+"<label>暖光:</label>"
+"<input type='range' id='warm' min='0' max='100' value='0'>"
+"<span id='warmVal'>0</span>%"
+"</div>"
+"<button id='dualBtn' class='dual-btn'>应用双色温</button>"
 "</div></div><script>\n"
 "function refresh(){\n"
 "  fetch('/status').then(function(r){return r.json()}).then(function(d){\n"
@@ -447,6 +532,14 @@ static NSString *const kIndexHTML = @"<!DOCTYPE html><html><head><meta charset='
 "    b.textContent = d.isOn ? '关闭' : '开启';\n"
 "    b.className = d.isOn ? 'off' : 'on';\n"
 "    document.getElementById('level').textContent = Math.round(d.level * 100);\n"
+"    if(d.coolLevel !== undefined){\n"
+"      document.getElementById('cool').value = Math.round(d.coolLevel * 100);\n"
+"      document.getElementById('coolVal').textContent = Math.round(d.coolLevel * 100);\n"
+"    }\n"
+"    if(d.warmLevel !== undefined){\n"
+"      document.getElementById('warm').value = Math.round(d.warmLevel * 100);\n"
+"      document.getElementById('warmVal').textContent = Math.round(d.warmLevel * 100);\n"
+"    }\n"
 "  }).catch(function(e){console.error(e)});\n"
 "}\n"
 "function post(path, body){\n"
@@ -456,6 +549,17 @@ static NSString *const kIndexHTML = @"<!DOCTYPE html><html><head><meta charset='
 "document.getElementById('slider').addEventListener('input', function(){\n"
 "  document.getElementById('level').textContent = this.value;\n"
 "  post('/level', this.value / 100);\n"
+"});\n"
+"document.getElementById('cool').addEventListener('input', function(){\n"
+"  document.getElementById('coolVal').textContent = this.value;\n"
+"});\n"
+"document.getElementById('warm').addEventListener('input', function(){\n"
+"  document.getElementById('warmVal').textContent = this.value;\n"
+"});\n"
+"document.getElementById('dualBtn').addEventListener('click', function(){\n"
+"  var cool = document.getElementById('cool').value / 100;\n"
+"  var warm = document.getElementById('warm').value / 100;\n"
+"  post('/dual', cool + ',' + warm);\n"
 "});\n"
 "var btns = document.querySelectorAll('[data-m]');\n"
 "for (var i = 0; i < btns.length; i++) {\n"
@@ -604,6 +708,17 @@ static NSString *const kIndexHTML = @"<!DOCTYPE html><html><head><meta charset='
     } else if ([path isEqualToString:@"/level"]) {
         [c turnOn:[body floatValue] strategy:FlashlightStrategyAuto];
         [self sendJSON:[c status] to:clientSocket];
+    } else if ([path isEqualToString:@"/dual"]) {
+        // body 格式: "cool,warm" 例如 "1.0,0.5" 或 "0.8,0.3"
+        NSArray *parts = [body componentsSeparatedByString:@","];
+        if (parts.count == 2) {
+            float cool = [parts[0] floatValue];
+            float warm = [parts[1] floatValue];
+            [c turnOnDual:cool warm:warm];
+            [self sendJSON:[c status] to:clientSocket];
+        } else {
+            [self sendResponse:@"400 Bad Request: body should be 'cool,warm'" contentType:@"text/plain" to:clientSocket];
+        }
     } else {
         [self sendResponse:@"404 Not Found" contentType:@"text/plain" to:clientSocket];
     }

@@ -1,0 +1,39 @@
+name: Build iOS Package
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Theos
+      run: |
+        git clone --recursive https://github.com/theos/theos.git $HOME/theos
+        brew install ldid
+
+    - name: Setup iOS SDK
+      run: |
+        cd $HOME/theos/sdks
+        curl -LO https://github.com/theos/sdks/archive/master.zip
+        unzip master.zip
+        mv sdks-master/*.sdk .
+        rm -rf sdks-master master.zip
+
+    - name: Build package
+      run: |
+        export THEOS=$HOME/theos
+        export PATH="$THEOS/bin:$PATH"
+        make package FINALPACKAGE=1
+
+    - name: Upload deb
+      uses: actions/upload-artifact@v4
+      with:
+        name: FlashlightDaemon-deb
+        path: packages/*.deb
